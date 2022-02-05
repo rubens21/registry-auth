@@ -1,6 +1,6 @@
-module github.com/adigunhammedolalekan/registry-auth
+module github.com/rubens21/registry-auth
 
-go 1.13
+go 1.16
 
 require (
 	github.com/docker/distribution v2.7.1+incompatible
