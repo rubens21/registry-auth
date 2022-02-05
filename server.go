@@ -15,7 +15,7 @@ type AuthServer struct {
 	authorizer     Authorizer
 	authenticator  Authenticator
 	tokenGenerator TokenGenerator
-	crt, key string
+	crt, key       string
 }
 
 // NewAuthServer creates a new AuthServer
@@ -53,8 +53,8 @@ func (srv *AuthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized: invalid auth credentials", http.StatusUnauthorized)
 		return
 	}
-	req := srv.parseRequest(r)
-	actions, err := srv.authorizer.Authorize(req, username)
+	req := srv.parseRequest(r, username)
+	actions, err := srv.authorizer.Authorize(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -69,11 +69,11 @@ func (srv *AuthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	srv.ok(w, tk)
 }
 
-func (srv *AuthServer) parseRequest(r *http.Request) *AuthorizationRequest {
+func (srv *AuthServer) parseRequest(r *http.Request, username string) *AuthorizationRequest {
 	q := r.URL.Query()
 	req := &AuthorizationRequest{
 		Service: q.Get("service"),
-		Account: q.Get("account"),
+		Account: username,
 	}
 	parts := strings.Split(r.URL.Query().Get("scope"), ":")
 	if len(parts) > 0 {
@@ -84,9 +84,6 @@ func (srv *AuthServer) parseRequest(r *http.Request) *AuthorizationRequest {
 	}
 	if len(parts) > 2 {
 		req.Actions = strings.Split(parts[2], ",")
-	}
-	if req.Account == "" {
-		req.Account = req.Name
 	}
 	return req
 }
