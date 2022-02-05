@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	registry "github.com/adigunhammedolalekan/registry-auth"
+	"github.com/rubens21/registry-auth"
 	"log"
 	"net/http"
 	"os"
