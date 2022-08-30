@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,7 @@ type mockTokenGenerator struct {
 func newMockTokenGenerator(t *Token, err error) *mockTokenGenerator {
 	return &mockTokenGenerator{t: t, err: err}
 }
-func (t *mockTokenGenerator) Generate(req *AuthorizationRequest, actions []string) (*Token, error) {
+func (t *mockTokenGenerator) Generate(ctx context.Context, req *AuthorizationRequest, actions []string) (*Token, error) {
 	return t.t, t.err
 }
 
@@ -29,7 +30,7 @@ func newMockAuthenticator(u, p string) *mockAuthenticator {
 	return &mockAuthenticator{username: u, password: p}
 }
 
-func (a *mockAuthenticator) Authenticate(username, password string) error {
+func (a *mockAuthenticator) Authenticate(ctx context.Context, username, password string) error {
 	if a.username != username || a.password != password {
 		return errors.New("invalid login")
 	}
@@ -44,7 +45,7 @@ func newMockAuthorizer(p []string) *mockAuthorizer {
 	return &mockAuthorizer{perms: p}
 }
 
-func (a *mockAuthorizer) Authorize(req *AuthorizationRequest) ([]string, error) {
+func (a *mockAuthorizer) Authorize(ctx context.Context, req *AuthorizationRequest) ([]string, error) {
 	return a.perms, nil
 }
 
@@ -58,6 +59,7 @@ func TestNewAuthServerServe(t *testing.T) {
 		tokenGenerator: newMockTokenGenerator(mockToken, nil),
 		authorizer:     newMockAuthorizer([]string{"pull", "push"}),
 		authenticator:  newMockAuthenticator("foo", "bar"),
+		logger:         logger{},
 	}
 	srv.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -75,6 +77,7 @@ func TestAuthServer_ServeHTTPAuthError(t *testing.T) {
 		tokenGenerator: &mockTokenGenerator{},
 		authorizer:     newMockAuthorizer([]string{"pull", "push"}),
 		authenticator:  newMockAuthenticator("foo", "bar"),
+		logger:         logger{},
 	}
 	srv.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
@@ -92,9 +95,33 @@ func TestAuthServer_ServeHTTPTokenError(t *testing.T) {
 		tokenGenerator: newMockTokenGenerator(nil, errors.New("fake token error")),
 		authorizer:     newMockAuthorizer([]string{"pull", "push"}),
 		authenticator:  newMockAuthenticator("foo", "bar"),
+		logger:         logger{},
 	}
 	srv.ServeHTTP(w, r)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status code %d; got %d", http.StatusInternalServerError, w.Code)
 	}
+}
+
+func TestAuthServer_ExpiredContext(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RequestURI = "token?service=registry.docker.io&scope=repository:samalba/my-app:pull,push"
+	r.SetBasicAuth("foo", "bar")
+
+	srv := &AuthServer{
+		tokenGenerator: newMockTokenGenerator(nil, errors.New("fake token error")),
+		authorizer:     newMockAuthorizer([]string{"pull", "push"}),
+		authenticator:  newMockAuthenticator("foo", "bar"),
+		logger:         logger{},
+	}
+
+	ctxCanceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	srv.ServeHTTP(w, r.WithContext(ctxCanceled))
+	if w.Code != http.StatusRequestTimeout {
+		t.Fatalf("expected status code %d; got %d", http.StatusInternalServerError, w.Code)
+	}
+
 }
