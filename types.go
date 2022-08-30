@@ -15,6 +15,8 @@ type Option struct {
 	TokenExpiration int64
 	// token issuer specified in docker registry configuration file
 	TokenIssuer string
+
+	Logger Logger
 }
 
 type TokenOption struct {
@@ -30,4 +32,11 @@ type AuthorizationRequest struct {
 	Name    string
 	IP      string
 	Actions []string
+}
+
+type Logger interface {
+	Debugf(template string, args ...interface{})
+	Infof(template string, args ...interface{})
+	Warnf(template string, args ...interface{})
+	Errorf(template string, args ...interface{})
 }

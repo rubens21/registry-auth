@@ -1,15 +1,17 @@
 package registry
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/docker/distribution/registry/auth/token"
-	"github.com/docker/libtrust"
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/docker/distribution/registry/auth/token"
+	"github.com/docker/libtrust"
 )
 
 // Token rep the JWT token that'll be created when authentication/authorizations succeeds
@@ -22,7 +24,7 @@ type Token struct {
 // An implementation should return a non-nil error when authentication is not successful, otherwise
 // a nil error should be returned
 type Authenticator interface {
-	Authenticate(username, password string) error
+	Authenticate(ctx context.Context, username, password string) error
 }
 
 // Authorizer should be implemented to perform authorization.
@@ -30,27 +32,27 @@ type Authenticator interface {
 // this function should return the list of authorized actions and a nil error. an empty list must be returned
 // if requesting user is unauthorized
 type Authorizer interface {
-	Authorize(req *AuthorizationRequest) ([]string, error)
+	Authorize(ctx context.Context, req *AuthorizationRequest) ([]string, error)
 }
 
 // TokenGenerator: an implementation should create a valid JWT according to the spec here
 // https://github.com/docker/distribution/blob/1b9ab303a477ded9bdd3fc97e9119fa8f9e58fca/docs/spec/auth/jwt.md
 // a default implementation that follows the spec is used when it is not provided
 type TokenGenerator interface {
-	Generate(req *AuthorizationRequest, actions []string) (*Token, error)
+	Generate(ctx context.Context, req *AuthorizationRequest, actions []string) (*Token, error)
 }
 
 // DefaultAuthenticator makes authentication successful by default
 type DefaultAuthenticator struct{}
 
-func (d *DefaultAuthenticator) Authenticate(username, password string) error {
+func (d *DefaultAuthenticator) Authenticate(ctx context.Context, username, password string) error {
 	return nil
 }
 
 // DefaultAuthorizer makes authorization successful by default
 type DefaultAuthorizer struct{}
 
-func (d *DefaultAuthorizer) Authorize(req *AuthorizationRequest) ([]string, error) {
+func (d *DefaultAuthorizer) Authorize(ctx context.Context, req *AuthorizationRequest) ([]string, error) {
 	return []string{"pull", "push"}, nil
 }
 
@@ -64,7 +66,7 @@ func newTokenGenerator(pk libtrust.PublicKey, prk libtrust.PrivateKey, opt *Toke
 	return &tokenGenerator{pubKey: pk, privateKey: prk, tokenOpt: opt}
 }
 
-func (tg *tokenGenerator) Generate(req *AuthorizationRequest, actions []string) (*Token, error) {
+func (tg *tokenGenerator) Generate(ctx context.Context, req *AuthorizationRequest, actions []string) (*Token, error) {
 	// sign any string to get the used signing Algorithm for the private key
 	_, algo, err := tg.privateKey.Sign(strings.NewReader(signAuth), 0)
 	if err != nil {
