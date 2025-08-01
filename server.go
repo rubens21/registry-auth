@@ -15,6 +15,7 @@ type AuthServer struct {
 	authorizer     Authorizer
 	authenticator  Authenticator
 	tokenGenerator TokenGenerator
+	logger         Logger
 	crt, key       string
 }
 
@@ -25,6 +26,10 @@ func NewAuthServer(opt *Option) (*AuthServer, error) {
 	}
 	if opt.Authorizer == nil {
 		opt.Authorizer = &DefaultAuthorizer{}
+	}
+
+	if opt.Logger == nil {
+		opt.Logger = logger{}
 	}
 
 	pb, prk, err := loadCertAndKey(opt.Certfile, opt.Keyfile)
@@ -38,34 +43,62 @@ func NewAuthServer(opt *Option) (*AuthServer, error) {
 	return &AuthServer{
 		authorizer:     opt.Authorizer,
 		authenticator:  opt.Authenticator,
+		logger:         opt.Logger,
 		tokenGenerator: opt.TokenGenerator, crt: opt.Certfile, key: opt.Keyfile,
 	}, nil
 }
 
 func (srv *AuthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	srv.logger.Debugf("[%s] request received", r.URL.Path)
 	// grab user's auth parameters
 	username, password, ok := r.BasicAuth()
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if err := srv.authenticator.Authenticate(username, password); err != nil {
+	srv.logger.Debugf("[%s] request from user '%s'", r.URL.Path, username)
+
+	if r.Context().Err() != nil {
+		srv.logger.Debugf("[%s] user %s disconnected before authentication (%s)", r.URL.Path, username, r.Context().Err())
+		http.Error(w, "unauthorized: disconnected too early (code 1)", http.StatusRequestTimeout)
+		return
+	}
+
+	if err := srv.authenticator.Authenticate(r.Context(), username, password); err != nil {
 		http.Error(w, "unauthorized: invalid auth credentials", http.StatusUnauthorized)
 		return
 	}
+	srv.logger.Debugf("[%s] user %s authenticated", username)
+
 	req := srv.parseRequest(r, username)
-	actions, err := srv.authorizer.Authorize(req)
+
+	if r.Context().Err() != nil {
+		srv.logger.Debugf("[%s] user %s disconnected before authorization (%s)", r.URL.Path, username, r.Context().Err())
+		http.Error(w, "unauthorized: disconnected too early (code 2)", http.StatusRequestTimeout)
+		return
+	}
+
+	actions, err := srv.authorizer.Authorize(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	srv.logger.Debugf("[%s] user %s authorized", username)
+
+	if r.Context().Err() != nil {
+		srv.logger.Debugf("[%s] user %s disconnected before token generation (%s)", r.URL.Path, username, r.Context().Err())
+		http.Error(w, "unauthorized: disconnected too early (code 3)", http.StatusRequestTimeout)
+		return
+	}
 	// create token for this user using the actions returned
 	// from the authorization check
-	tk, err := srv.tokenGenerator.Generate(req, actions)
+	tk, err := srv.tokenGenerator.Generate(r.Context(), req, actions)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
+	srv.logger.Debugf("[%s] token generated to user %s", username)
+
 	srv.ok(w, tk)
 }
 
